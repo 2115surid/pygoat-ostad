@@ -1,15 +1,75 @@
+
 name: Semgrep SAST Scan
+
 on:
- pull_request:
- branches: [ "main", "v2" ]
+  push:
+    branches: ["main", "v2"]
+
+  pull_request:
+    branches: ["main", "v2"]
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
- semgrep:
- name: Scan PR for Django Vulnerabilities
- runs-on: ubuntu-latest
- container:
- image: semgrep/semgrep
- steps:
- - uses: actions/checkout@v4
- - name: Run Semgrep on the introduction app
- run: semgrep scan --config p/django --config p/python
---error introduction/
+  semgrep:
+    name: Semgrep Security Scan
+    runs-on: ubuntu-latest
+
+    container:
+      image: semgrep/semgrep
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Semgrep Scan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            echo "Running diff-aware PR scan..."
+
+            semgrep scan \
+              --config p/django \
+              --config p/python \
+              --baseline-commit "$BASE_SHA" \
+              --json \
+              --output semgrep-results.json .
+
+            semgrep scan \
+              --config p/django \
+              --config p/python \
+              --baseline-commit "$BASE_SHA" \
+              --sarif \
+              --output semgrep-results.sarif .
+          else
+            echo "Running full repository scan..."
+
+            semgrep scan \
+              --config p/django \
+              --config p/python \
+              --json \
+              --output semgrep-results.json .
+
+            semgrep scan \
+              --config p/django \
+              --config p/python \
+              --sarif \
+              --output semgrep-results.sarif .
+          fi
+
+      - name: Upload Scan Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-sast-reports
+          path: |
+            semgrep-results.json
+            semgrep-results.sarif
+          if-no-files-found: warn
+          retention-days: 30
